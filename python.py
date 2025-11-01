@@ -221,7 +221,7 @@ if symbol:
         
         # --- TAB HIỂN THỊ DỮ LIỆU ---
         tab_names = [f"{i+1}. {REPORT_TYPES[key]}" for i, key in enumerate(REPORT_TYPES.keys())]
-        tab_names.extend(["4. Thống kê Mô tả", "5. Phân tích AI", "6. Trực quan hóa"])
+        tab_names.extend(["4. Thống kê Mô tả", "5. Trực quan hóa", "6. Phân tích AI"])
         
         tabs = st.tabs(tab_names)
         
