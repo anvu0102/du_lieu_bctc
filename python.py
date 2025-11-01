@@ -22,7 +22,7 @@ except ImportError:
     st.stop()
 
 # Tắt cảnh báo SettingWithCopyWarning của Pandas 
-warnings.filterwarnings('ignore', category=pd.core.common.SettingWithCopyWarning)
+warnings.filterwarnings('ignore')
 
 # --- CẤU HÌNH BAN ĐẦU ---
 st.set_page_config(
