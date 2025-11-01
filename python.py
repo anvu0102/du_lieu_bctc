@@ -60,7 +60,7 @@ def get_financial_data(symbol, period='year', source=SOURCE_DEFAULT):
     Tải Bảng Cân đối Kế toán, Báo cáo KQKD, và Báo cáo Lưu chuyển Tiền tệ
     cho một mã cổ phiếu sử dụng Vnstock.
     """
-    st.info(f"Đang tải dữ liệu tài chính cho mã **{symbol}** (Nguồn: {source}, Kỳ: {period})...")
+    st.info(f"Đang tải dữ liệu tài chính cho mã **{symbol}** (Nguồn: VCI, Kỳ: {period})...")
     financial_data = {}
     
     try:
@@ -275,34 +275,9 @@ if symbol:
             **Giải thích:** **Độ lệch chuẩn** và **Hệ số biến thiên** (CV) càng cao cho thấy mức độ biến động/bất ổn của chỉ số trong giai đoạn càng lớn.
             Giá trị được làm tròn.
             """)
-            
-        # --- TAB PHÂN TÍCH AI TỔNG HỢP ---
+
+        # --- TAB TRỰC QUAN HÓA ---
         with tabs[4]: 
-            st.subheader("Phân tích Chuyên sâu từ Gemini AI")
-            st.markdown("Chức năng này sử dụng Bảng Thống kê (Tab 4) làm cơ sở để AI phân tích tình hình tài chính tổng thể của công ty.")
-            
-            if not api_key:
-                st.error("Vui lòng nhập **GEMINI_API_KEY** vào Sidebar để kích hoạt chức năng này.")
-            
-            elif 'income_statement' not in stats_dfs or 'balance_sheet' not in stats_dfs:
-                st.warning("Thiếu dữ liệu (KQKD hoặc Bảng Cân đối Kế toán) để tiến hành phân tích AI.")
-
-            else:
-                if st.button("🌟 Yêu cầu AI Phân tích Tổng hợp Báo cáo Tài chính"):
-                    with st.spinner('Đang gửi dữ liệu thống kê và chờ Gemini phân tích...'):
-                        
-                        ai_result = get_ai_analysis(
-                            stats_dfs['income_statement'], 
-                            stats_dfs['balance_sheet'], 
-                            symbol, 
-                            PERIOD_OPTIONS[period], 
-                            api_key
-                        )
-                        st.markdown("**Kết quả Phân tích từ Gemini AI:**")
-                        st.info(ai_result)
-
-        # --- TAB TRỰC QUAN HÓA (ĐÃ FIX LỖI) ---
-        with tabs[5]: 
             st.subheader("📊 Trực quan hóa Xu hướng Quan trọng (Báo cáo KQKD)")
 
             if 'income_statement' in financial_data:
@@ -347,6 +322,31 @@ if symbol:
                         st.warning(f"Không có dữ liệu hợp lệ cho chỉ tiêu '{selected_metric}' để vẽ biểu đồ.")
                 else:
                     st.warning("Không tìm thấy đủ dữ liệu (cột số hoặc cột thời gian) trong Báo cáo KQKD để trực quan hóa. Vui lòng kiểm tra cấu trúc dữ liệu.")
+
+        # --- TAB PHÂN TÍCH AI TỔNG HỢP ---
+        with tabs[5]: 
+            st.subheader("Phân tích Chuyên sâu từ Gemini AI")
+            st.markdown("Chức năng này sử dụng Bảng Thống kê (Tab 4) làm cơ sở để AI phân tích tình hình tài chính tổng thể của công ty.")
+            
+            if not api_key:
+                st.error("Vui lòng nhập **GEMINI_API_KEY** vào Sidebar để kích hoạt chức năng này.")
+            
+            elif 'income_statement' not in stats_dfs or 'balance_sheet' not in stats_dfs:
+                st.warning("Thiếu dữ liệu (KQKD hoặc Bảng Cân đối Kế toán) để tiến hành phân tích AI.")
+
+            else:
+                if st.button("🌟 Yêu cầu AI Phân tích Tổng hợp Báo cáo Tài chính"):
+                    with st.spinner('Đang gửi dữ liệu thống kê và chờ Gemini phân tích...'):
+                        
+                        ai_result = get_ai_analysis(
+                            stats_dfs['income_statement'], 
+                            stats_dfs['balance_sheet'], 
+                            symbol, 
+                            PERIOD_OPTIONS[period], 
+                            api_key
+                        )
+                        st.markdown("**Kết quả Phân tích từ Gemini AI:**")
+                        st.info(ai_result)
                 
 else:
     st.info("Vui lòng nhập Mã Cổ Phiếu để bắt đầu.")
