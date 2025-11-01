@@ -6,6 +6,9 @@ import seaborn as sns
 import numpy as np
 import warnings
 from pandas.api.types import is_numeric_dtype
+# Thêm thư viện nén ZIP
+import zipfile
+import io
 
 # --- 1. IMPORT THƯ VIỆN BỔ SUNG CHO GEMINI AI ---
 try:
@@ -93,7 +96,7 @@ def get_all_financial_data(stock_list, period='year', source=SOURCE_DEFAULT):
     for i, symbol in enumerate(stock_list):
         status_text.info(f"Đang tải dữ liệu cho mã **{symbol}** ({i + 1}/{total_stocks})...")
         data = get_financial_data(symbol, period, source)
-        if data:
+        if data and not any(df.empty for df in data.values() if df is not None):
             all_data[symbol] = data
     
     status_text.success(f"Hoàn tất tải dữ liệu cho {len(all_data)}/{total_stocks} mã cổ phiếu.")
@@ -127,14 +130,37 @@ def create_combined_excel(symbol, financial_data):
 
                 # Sắp xếp hiển thị: mới nhất lên đầu
                 sort_col = 'id' if 'id' in df_to_save.columns else ('ReportDate' if 'ReportDate' in df_to_save.columns else df_to_save.columns[0])
-                df_to_save = df_to_save.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
+                if sort_col in df_to_save.columns:
+                    df_to_save = df_to_save.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
                 
                 sheet_name = f"{name} - {symbol}".replace('Báo cáo', '').strip()[:30] # Giới hạn tên sheet
                 df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
             else:
-                st.warning(f"Dữ liệu {name} cho {symbol} bị trống, sheet này sẽ bị bỏ qua.")
+                pass # Bỏ qua sheet bị trống
 
-    return output.getvalue()
+    # Kiểm tra xem có sheet nào được ghi vào không
+    if output.tell() > 0:
+        return output.getvalue()
+    return None
+
+# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO CỦA DANH SÁCH CỔ PHIẾU ---
+def create_zip_file(all_financial_data, period):
+    """Nén tất cả các file Excel Báo cáo Tài chính của từng mã vào một file ZIP."""
+    
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
+        for symbol, data in all_financial_data.items():
+            excel_data = create_combined_excel(symbol, data)
+            
+            if excel_data:
+                file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.xlsx'
+                # Ghi file Excel (BytesIO content) vào file ZIP
+                zip_file.writestr(file_name, excel_data)
+                
+    # Trở về đầu buffer để đọc nội dung file ZIP
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
 
 
 # --- HÀM TÍNH TOÁN THỐNG KÊ MÔ TẢ (CHO TÀI CHÍNH) ---
@@ -198,7 +224,7 @@ def calculate_descriptive_stats(df, report_name):
 
     return pd.DataFrame(stats_list)
 
-# --- HÀM GỌI API GEMINI ---
+# --- HÀM GỌI API GEMINI (Giữ nguyên) ---
 def get_ai_analysis(stats_df_income, stats_df_balance, symbol, period, api_key):
     """Gửi bảng thống kê đến Gemini để phân tích Báo cáo Tài chính."""
     try:
@@ -317,15 +343,16 @@ if analysis_mode == 'Phân tích 1 Cổ phiếu':
                             key=f'download_{key}'
                         )
                         
-                        # Thêm nút tải file tổng hợp 3 sheet
+                        # Thêm nút tải file tổng hợp 3 sheet (Vẫn giữ cho chế độ phân tích 1 cổ phiếu để tiện)
                         excel_data_combined = create_combined_excel(symbol, financial_data)
-                        st.download_button(
-                            label=f"📥 Tải Báo cáo Tài chính - {symbol} (3 Sheets) (.xlsx)",
-                            data=excel_data_combined,
-                            file_name=f'Báo cáo tài chính - {symbol}.xlsx',
-                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            key=f'download_combined_{key}'
-                        )
+                        if excel_data_combined:
+                            st.download_button(
+                                label=f"📥 Tải Báo cáo Tài chính - {symbol} (3 Sheets) (.xlsx)",
+                                data=excel_data_combined,
+                                file_name=f'Báo cáo tài chính - {symbol}.xlsx',
+                                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                key=f'download_combined_{key}'
+                            )
 
 
                     else:
@@ -449,19 +476,26 @@ elif analysis_mode == 'Phân tích Danh sách Cổ phiếu':
             if all_financial_data:
                 st.success(f"Đã tải thành công dữ liệu cho {len(all_financial_data)} mã.")
                 st.markdown("---")
-                st.subheader("Hoàn tất: Tải File Excel Tổng hợp (3 Sheets/Cổ phiếu)")
+                st.subheader("Hoàn tất: Tải File ZIP Tổng hợp")
 
-                for symbol, data in all_financial_data.items():
-                    excel_data_combined = create_combined_excel(symbol, data)
-                    if excel_data_combined:
-                         st.download_button(
-                            label=f"📥 Tải Báo cáo Tài chính - {symbol} (.xlsx)",
-                            data=excel_data_combined,
-                            file_name=f'Báo cáo tài chính - {symbol}.xlsx',
-                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            key=f'download_list_{symbol}'
-                        )
-                    
+                # --- PHẦN TẠO VÀ TẢI FILE ZIP (MỚI) ---
+                with st.spinner('Đang nén tất cả báo cáo tài chính thành file ZIP...'):
+                    zip_bytes = create_zip_file(all_financial_data, period)
+
+                if zip_bytes:
+                    st.download_button(
+                        label="📦 Tải TẤT CẢ Báo cáo Tài chính (.zip)",
+                        data=zip_bytes,
+                        file_name=f'Bao_cao_tai_chinh_Danh_sach_{PERIOD_OPTIONS[period]}_{len(all_financial_data)}_ma.zip',
+                        mime='application/zip',
+                        key='download_all_zip',
+                        help="Tải về một file ZIP chứa các file Excel (3 sheets/mã) cho tất cả các cổ phiếu đã tải thành công."
+                    )
+                    st.success("File ZIP tổng hợp đã sẵn sàng để tải xuống.")
+                else:
+                    st.error("Không thể tạo file ZIP. Có thể không có đủ dữ liệu hợp lệ cho bất kỳ mã cổ phiếu nào.")
+                # --- KẾT THÚC PHẦN TẠO VÀ TẢI FILE ZIP ---
+            
             else:
                 st.warning("Không có dữ liệu nào được tải thành công. Vui lòng kiểm tra lại các mã cổ phiếu.")
     
