@@ -47,8 +47,8 @@ REPORT_TYPES = {
     'cash_flow': 'Báo cáo Lưu chuyển Tiền tệ'
 }
 PERIOD_OPTIONS = {
-    'year': 'Theo Năm (Annual)',
-    'quarter': 'Theo Quý (Quarterly)'
+    'year': 'Theo Năm',
+    'quarter': 'Theo Quý'
 }
 SOURCE_DEFAULT = 'TCBS'
 
@@ -318,13 +318,7 @@ if symbol:
                 chart_cols.extend([col for col in numeric_cols if col not in chart_cols])
                 
                 # Sửa lỗi: Tìm cột thời gian linh hoạt
-                time_col_for_chart = None
-                if 'id' in df_income.columns:
-                    time_col_for_chart = 'id'
-                elif 'ReportDate' in df_income.columns:
-                    time_col_for_chart = 'ReportDate'
-                elif 'Period' in df_income.columns:
-                    time_col_for_chart = 'Period'
+                time_col_for_chart = 'period'
 
                 if chart_cols and time_col_for_chart:
                     selected_metric = st.selectbox(
