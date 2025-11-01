@@ -21,8 +21,16 @@ except ImportError:
     st.error("Lỗi: Thư viện 'vnstock' chưa được cài đặt. Vui lòng chạy `pip install vnstock`.")
     st.stop()
 
-# Tắt cảnh báo SettingWithCopyWarning của Pandas 
-warnings.filterwarnings('ignore')
+# --- SỬA LỖI ATTRIBUTEERROR ---
+# Thay đổi cách import SettingWithCopyWarning để tương thích với Pandas mới
+try:
+    from pandas.errors import SettingWithCopyWarning
+    warnings.filterwarnings('ignore', category=SettingWithCopyWarning)
+except ImportError:
+    pass 
+except AttributeError:
+    pass
+
 
 # --- CẤU HÌNH BAN ĐẦU ---
 st.set_page_config(
@@ -84,13 +92,21 @@ def calculate_descriptive_stats(df, report_name):
     """Tính toán thống kê mô tả chi tiết cho các chỉ số tài chính."""
     stats_list = []
     
-    # QUAN TRỌNG: Reset index trước khi tính toán để xử lý cột 'id'
     df_temp = df.copy()
     if df_temp.index.names is not None and len(df_temp.index.names) > 0:
         df_temp = df_temp.reset_index(drop=False)
 
     numeric_cols = [col for col in df_temp.columns if is_numeric_dtype(df_temp[col])]
-    time_col = 'id' if 'id' in df_temp.columns else df_temp.columns[0] # Dùng id để xác định kỳ
+    
+    # Tìm cột thời gian linh hoạt
+    time_col = 'id'
+    if 'id' not in df_temp.columns:
+        if 'ReportDate' in df_temp.columns:
+            time_col = 'ReportDate'
+        elif 'Period' in df_temp.columns:
+            time_col = 'Period'
+        else:
+            time_col = df_temp.columns[0] # Dự phòng
 
     for col in numeric_cols:
         series = df_temp[col].dropna()
@@ -110,11 +126,9 @@ def calculate_descriptive_stats(df, report_name):
         median_val = series.median()
         cv = (std_val / mean_val) * 100 if mean_val != 0 else np.nan
 
-        # Tìm kỳ tương ứng (nếu có cột thời gian)
         try:
             df_sorted = df_temp.sort_values(by=time_col)
             
-            # Lấy kỳ (ID) ứng với Min/Max
             period_min = df_sorted.loc[df_sorted[col] == min_val, time_col].iloc[0]
             period_max = df_sorted.loc[df_sorted[col] == max_val, time_col].iloc[0]
         except Exception:
@@ -122,7 +136,7 @@ def calculate_descriptive_stats(df, report_name):
 
         stats_list.append({
             'Chỉ tiêu': col,
-            'Trung bình (Mean)': f"{mean_val:,.0f}", # Làm tròn vì giá trị tài chính lớn
+            'Trung bình (Mean)': f"{mean_val:,.0f}", 
             'Độ lệch chuẩn (Std Dev)': f"{std_val:,.0f}",
             'Giá trị nhỏ nhất (Min)': f"{min_val:,.0f}",
             'Kỳ Min': period_min,
@@ -206,7 +220,6 @@ if symbol:
     if financial_data:
         
         # --- TAB HIỂN THỊ DỮ LIỆU ---
-        # Tách tab trực quan hóa ra khỏi tab dữ liệu
         tab_names = [f"{i+1}. {REPORT_TYPES[key]}" for i, key in enumerate(REPORT_TYPES.keys())]
         tab_names.extend(["4. Thống kê Mô tả", "5. Phân tích AI", "6. Trực quan hóa"])
         
@@ -214,7 +227,6 @@ if symbol:
         
         stats_dfs = {}
 
-        # Hiển thị từng loại báo cáo trong các tab
         report_keys = list(REPORT_TYPES.keys())
         for i, key in enumerate(report_keys):
             name = REPORT_TYPES[key]
@@ -224,14 +236,13 @@ if symbol:
                 df = financial_data[key].copy() 
                 
                 if df is not None and not df.empty:
-                    # RẤT QUAN TRỌNG: Đảm bảo df không có MultiIndex trước khi sắp xếp hiển thị
                     if df.index.names is not None and len(df.index.names) > 0:
                         df = df.reset_index(drop=False)
                         
-                    if 'id' in df.columns:
-                        df_display = df.sort_values(by='id', ascending=False).reset_index(drop=True)
-                    else:
-                        df_display = df.copy().reset_index(drop=True)
+                    # Sắp xếp hiển thị
+                    sort_col = 'id' if 'id' in df.columns else ('ReportDate' if 'ReportDate' in df.columns else df.columns[0])
+                    
+                    df_display = df.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
 
                     st.dataframe(df_display, use_container_width=True)
 
@@ -250,7 +261,7 @@ if symbol:
                     st.warning(f"Không tìm thấy hoặc dữ liệu {name} bị trống cho mã **{symbol}**.")
 
         # --- TAB THỐNG KÊ MÔ TẢ ---
-        with tabs[3]: # Index 3 (4. Thống kê Mô tả)
+        with tabs[3]: 
             st.subheader(f"Thống kê Mô tả Báo cáo Tài chính {symbol}")
             
             if stats_dfs:
@@ -266,7 +277,7 @@ if symbol:
             """)
             
         # --- TAB PHÂN TÍCH AI TỔNG HỢP ---
-        with tabs[4]: # Index 4 (5. Phân tích AI)
+        with tabs[4]: 
             st.subheader("Phân tích Chuyên sâu từ Gemini AI")
             st.markdown("Chức năng này sử dụng Bảng Thống kê (Tab 4) làm cơ sở để AI phân tích tình hình tài chính tổng thể của công ty.")
             
@@ -290,14 +301,13 @@ if symbol:
                         st.markdown("**Kết quả Phân tích từ Gemini AI:**")
                         st.info(ai_result)
 
-        # --- TAB TRỰC QUAN HÓA ---
-        with tabs[5]: # Index 5 (6. Trực quan hóa)
+        # --- TAB TRỰC QUAN HÓA (ĐÃ FIX LỖI) ---
+        with tabs[5]: 
             st.subheader("📊 Trực quan hóa Xu hướng Quan trọng (Báo cáo KQKD)")
 
             if 'income_statement' in financial_data:
                 df_income = financial_data['income_statement'].copy()
                 
-                # RẤT QUAN TRỌNG: Reset index để đảm bảo cột 'id' là cột dữ liệu, sửa lỗi ValueError
                 if df_income.index.names is not None and len(df_income.index.names) > 0:
                     df_income = df_income.reset_index(drop=False) 
 
@@ -307,18 +317,25 @@ if symbol:
                 chart_cols = [col for col in default_metrics if col in numeric_cols]
                 chart_cols.extend([col for col in numeric_cols if col not in chart_cols])
                 
-                if chart_cols and 'id' in df_income.columns:
+                # Sửa lỗi: Tìm cột thời gian linh hoạt
+                time_col_for_chart = None
+                if 'id' in df_income.columns:
+                    time_col_for_chart = 'id'
+                elif 'ReportDate' in df_income.columns:
+                    time_col_for_chart = 'ReportDate'
+                elif 'Period' in df_income.columns:
+                    time_col_for_chart = 'Period'
+
+                if chart_cols and time_col_for_chart:
                     selected_metric = st.selectbox(
                         "Chọn chỉ tiêu cần trực quan hóa từ Báo cáo KQKD:",
                         options=chart_cols,
                         index=chart_cols.index('NetProfit') if 'NetProfit' in chart_cols else 0
                     )
-                    time_col_for_chart = 'id'
                     
                     df_chart = df_income[[time_col_for_chart, selected_metric]].dropna()
                     
                     if not df_chart.empty:
-                        # Sắp xếp theo cột 'id' (đã là cột dữ liệu)
                         df_chart = df_chart.sort_values(by=time_col_for_chart, ascending=True)
 
                         fig, ax = plt.subplots(figsize=(10, 5))
@@ -335,7 +352,7 @@ if symbol:
                     else:
                         st.warning(f"Không có dữ liệu hợp lệ cho chỉ tiêu '{selected_metric}' để vẽ biểu đồ.")
                 else:
-                    st.warning("Không tìm thấy đủ dữ liệu (cột số và cột 'id') trong Báo cáo KQKD để trực quan hóa.")
+                    st.warning("Không tìm thấy đủ dữ liệu (cột số hoặc cột thời gian) trong Báo cáo KQKD để trực quan hóa. Vui lòng kiểm tra cấu trúc dữ liệu.")
                 
 else:
     st.info("Vui lòng nhập Mã Cổ Phiếu để bắt đầu.")
