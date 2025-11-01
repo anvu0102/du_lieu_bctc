@@ -10,3 +10,4 @@ pandas-datareader
 openpyxl
 xlsxwriter
 tabulate
+fpdf2
