@@ -7,7 +7,14 @@ import numpy as np
 import warnings
 from pandas.api.types import is_numeric_dtype
 import zipfile
-import io # Import io để xử lý BytesIO và ZIP
+import io
+# Import FPDF2 để tạo PDF
+try:
+    from fpdf import FPDF
+except ImportError:
+    st.error("Lỗi: Thư viện 'fpdf2' chưa được cài đặt. Vui lòng chạy `pip install fpdf2`.")
+    st.stop()
+
 
 # --- 1. IMPORT THƯ VIỆN BỔ SUNG CHO GEMINI AI ---
 try:
@@ -109,7 +116,7 @@ def get_all_financial_data(stock_list, period='year', source=SOURCE_DEFAULT):
     return all_data
 
 
-# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐƠN SHEET ---
+# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐƠN SHEET (Giữ nguyên) ---
 @st.cache_data
 def to_excel(df_to_save, name):
     output = BytesIO()
@@ -118,7 +125,7 @@ def to_excel(df_to_save, name):
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐA-SHEET ---
+# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐA-SHEET (Giữ nguyên) ---
 @st.cache_data
 def create_combined_excel(symbol, financial_data):
     """Tạo file Excel (.xlsx) với 3 sheets: Bảng Cân đối Kế toán, Báo cáo KQKD, Báo cáo Lưu chuyển Tiền tệ."""
@@ -151,7 +158,7 @@ def create_combined_excel(symbol, financial_data):
         return output.getvalue()
     return None
 
-# --- HÀM HỖ TRỢ CHUYỂN DỮ LIỆU SANG ĐỊNH DẠNG TXT (MỚI) ---
+# --- HÀM HỖ TRỢ CHUYỂN DỮ LIỆU SANG ĐỊNH DẠNG TXT (Giữ nguyên) ---
 def create_txt_content(symbol, financial_data, period):
     """Nối dữ liệu 3 báo cáo thành một chuỗi văn bản duy nhất."""
     content = f"===== BÁO CÁO TÀI CHÍNH TỔNG HỢP CÔNG TY {symbol} (Kỳ: {PERIOD_OPTIONS[period]}) =====\n\n"
@@ -179,6 +186,94 @@ def create_txt_content(symbol, financial_data, period):
             
     return content
 
+
+# --- HÀM HỖ TRỢ CHUYỂN DỮ LIỆU SANG ĐỊNH DẠNG PDF (MỚI) ---
+def create_pdf_content(symbol, financial_data, period):
+    """Chuyển đổi dữ liệu 3 báo cáo thành một file PDF duy nhất."""
+
+    # Tùy chỉnh FPDF để hỗ trợ Unicode (Tiếng Việt)
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 12)
+            self.cell(0, 10, f'BÁO CÁO TÀI CHÍNH {symbol}', 0, 1, 'C')
+            self.set_font('Arial', '', 10)
+            self.cell(0, 5, f'Kỳ: {PERIOD_OPTIONS[period]}', 0, 1, 'C')
+            self.ln(5)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Arial', 'I', 8)
+            self.cell(0, 10, f'Trang {self.page_no()}', 0, 0, 'C')
+
+        def chapter_title(self, title):
+            self.set_font('Arial', 'B', 12)
+            self.set_fill_color(200, 220, 255)
+            self.cell(0, 8, title, 0, 1, 'L', 1)
+            self.ln(2)
+
+        def df_to_table(self, df, title):
+            self.add_page(orientation='L')  # Dùng khổ ngang cho bảng rộng
+            self.chapter_title(title)
+            
+            # Chuẩn hóa DataFrame
+            df_temp = df.copy()
+            if df_temp.index.names is not None and len(df_temp.index.names) > 0:
+                df_temp = df_temp.reset_index(drop=False)
+
+            # Sắp xếp hiển thị: mới nhất lên đầu
+            sort_col = 'id' if 'id' in df_temp.columns else ('ReportDate' if 'ReportDate' in df_temp.columns else df_temp.columns[0])
+            if sort_col in df_temp.columns:
+                df_temp = df_temp.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
+            
+            # Cấu hình bảng
+            col_width = 270 / len(df_temp.columns)
+            row_height = 7
+            
+            # Header
+            self.set_font('Arial', 'B', 8)
+            for col in df_temp.columns:
+                # Điều chỉnh Unicode (Tiếng Việt) - FPDF cơ bản khó hỗ trợ đầy đủ
+                self.cell(col_width, row_height, str(col)[:15], 1, 0, 'C')
+            self.ln(row_height)
+            
+            # Data
+            self.set_font('Arial', '', 8)
+            for index, row in df_temp.iterrows():
+                for item in row:
+                    try:
+                        text = f"{item:,.0f}" if isinstance(item, (int, float, np.number)) else str(item)
+                    except ValueError:
+                         text = str(item)
+                    
+                    # Cắt ngắn để tránh tràn ô
+                    text = text[:15]
+                    self.cell(col_width, row_height, text, 1, 0, 'R')
+                self.ln(row_height)
+            self.ln(5)
+
+    pdf = PDF(orientation='P')
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Thêm font hỗ trợ Unicode nếu cần thiết, nhưng dùng font mặc định đơn giản hơn
+    # Nếu muốn dùng tiếng Việt, cần add font như: pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
+    pdf.add_page()
+
+    has_data = False
+    for key, name in REPORT_TYPES.items():
+        df = financial_data.get(key)
+        
+        if df is not None and not df.empty:
+            pdf.df_to_table(df, name)
+            has_data = True
+        else:
+            pdf.set_font('Arial', 'I', 10)
+            pdf.cell(0, 10, f'--- Dữ liệu {name} bị trống ---', 0, 1)
+
+    if has_data:
+        return pdf.output(dest='S').encode('latin1') # 'S' trả về string, encode về bytes
+    return None
+
+
 # --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO EXCEL (TÍNH NĂNG CŨ) ---
 def create_zip_file_excel(all_financial_data, period):
     """Nén tất cả các file Excel Báo cáo Tài chính của từng mã vào một file ZIP."""
@@ -191,14 +286,12 @@ def create_zip_file_excel(all_financial_data, period):
             
             if excel_data:
                 file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.xlsx'
-                # Ghi file Excel (BytesIO content) vào file ZIP
                 zip_file.writestr(file_name, excel_data)
                 
-    # Trở về đầu buffer để đọc nội dung file ZIP
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO TXT (TÍNH NĂNG MỚI) ---
+# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO TXT (TÍNH NĂNG CŨ) ---
 def create_zip_file_txt(all_financial_data, period):
     """Nén tất cả các file TXT Báo cáo Tài chính của từng mã vào một file ZIP."""
     
@@ -210,13 +303,31 @@ def create_zip_file_txt(all_financial_data, period):
             
             if txt_content:
                 file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.txt'
-                # Ghi nội dung TXT (string) vào file ZIP
                 zip_file.writestr(file_name, txt_content.encode('utf-8'))
                 
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-# --- HÀM TÍNH TOÁN THỐNG KÊ MÔ TẢ (CHO TÀI CHÍNH) (Giữ nguyên) ---
+# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO PDF (TÍNH NĂNG MỚI) ---
+def create_zip_file_pdf(all_financial_data, period):
+    """Nén tất cả các file PDF Báo cáo Tài chính của từng mã vào một file ZIP."""
+    
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
+        for symbol, data in all_financial_data.items():
+            pdf_data = create_pdf_content(symbol, data, period)
+            
+            if pdf_data:
+                file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.pdf'
+                # Ghi nội dung PDF (bytes) vào file ZIP
+                zip_file.writestr(file_name, pdf_data)
+                
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+
+# --- HÀM TÍNH TOÁN THỐNG KÊ MÔ TẢ (Giữ nguyên) ---
 def calculate_descriptive_stats(df, report_name):
     """Tính toán thống kê mô tả chi tiết cho các chỉ số tài chính."""
     stats_list = []
@@ -358,7 +469,7 @@ if analysis_mode == 'Phân tích 1 Cổ phiếu':
 
         if financial_data:
             
-            # --- TAB HIỂN THỊ DỮ LIỆU ---
+            # ... (Các tab hiển thị, thống kê, trực quan hóa, AI giữ nguyên)
             tab_names = [f"{i+1}. {REPORT_TYPES[key]}" for i, key in enumerate(REPORT_TYPES.keys())]
             tab_names.extend(["4. Thống kê Mô tả", "5. Trực quan hóa", "6. Phân tích AI"])
             
@@ -498,6 +609,7 @@ if analysis_mode == 'Phân tích 1 Cổ phiếu':
                             )
                             st.markdown("**Kết quả Phân tích từ Gemini AI:**")
                             st.info(ai_result)
+
                     
     else:
         st.info("Vui lòng nhập Mã Cổ Phiếu để bắt đầu.")
@@ -531,43 +643,61 @@ elif analysis_mode == 'Phân tích Danh sách Cổ phiếu':
                 st.markdown("---")
                 st.subheader("Hoàn tất: Tải File ZIP Tổng hợp")
                 
-                # --- TẠO VÀ TẢI FILE ZIP EXCEL (Tính năng cũ) ---
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 
+                # --- TẠO VÀ TẢI FILE ZIP EXCEL ---
                 with col1:
-                    with st.spinner('Đang nén tất cả báo cáo tài chính thành file ZIP (Excel)...'):
+                    with st.spinner('Đang nén báo cáo thành file ZIP (Excel)...'):
                         zip_excel_bytes = create_zip_file_excel(all_financial_data, period)
 
-                    if zip_excel_bytes:
+                    if zip_excel_bytes and len(zip_excel_bytes) > len(all_financial_data) * 100: # Kiểm tra dung lượng tối thiểu
                         st.download_button(
                             label="📦 Tải TẤT CẢ Báo cáo (Định dạng Excel)",
                             data=zip_excel_bytes,
                             file_name=f'Bao_cao_tai_chinh_DS_{PERIOD_OPTIONS[period]}.zip',
                             mime='application/zip',
                             key='download_all_zip_excel',
-                            help="Tải về một file ZIP chứa các file Excel (3 sheets/mã) cho tất cả các cổ phiếu đã tải thành công."
+                            help="Tải về một file ZIP chứa các file Excel (3 sheets/mã)."
                         )
                         st.caption("Mỗi mã cổ phiếu là 1 file Excel (3 sheets).")
                     else:
-                        st.error("Không thể tạo file ZIP Excel.")
+                        st.warning("Không thể tạo file ZIP Excel hoặc dữ liệu rỗng.")
                 
-                # --- TẠO VÀ TẢI FILE ZIP TXT (Tính năng mới) ---
+                # --- TẠO VÀ TẢI FILE ZIP TXT ---
                 with col2:
-                    with st.spinner('Đang nén tất cả báo cáo tài chính thành file ZIP (TXT)...'):
+                    with st.spinner('Đang nén báo cáo thành file ZIP (TXT)...'):
                         zip_txt_bytes = create_zip_file_txt(all_financial_data, period)
 
-                    if zip_txt_bytes:
+                    if zip_txt_bytes and len(zip_txt_bytes) > len(all_financial_data) * 100:
                         st.download_button(
                             label="📄 Tải TẤT CẢ Báo cáo (Định dạng TXT)",
                             data=zip_txt_bytes,
                             file_name=f'Bao_cao_tai_chinh_DS_{PERIOD_OPTIONS[period]}_TXT.zip',
                             mime='application/zip',
                             key='download_all_zip_txt',
-                            help="Tải về một file ZIP chứa các file TXT (nối 3 báo cáo/mã) cho tất cả các cổ phiếu đã tải thành công."
+                            help="Tải về một file ZIP chứa các file TXT (nối 3 báo cáo/mã)."
                         )
                         st.caption("Mỗi mã cổ phiếu là 1 file TXT (3 báo cáo gộp).")
                     else:
-                        st.error("Không thể tạo file ZIP TXT.")
+                        st.warning("Không thể tạo file ZIP TXT hoặc dữ liệu rỗng.")
+
+                # --- TẠO VÀ TẢI FILE ZIP PDF (MỚI) ---
+                with col3:
+                    with st.spinner('Đang nén báo cáo thành file ZIP (PDF)...'):
+                        zip_pdf_bytes = create_zip_file_pdf(all_financial_data, period)
+
+                    if zip_pdf_bytes and len(zip_pdf_bytes) > len(all_financial_data) * 100:
+                        st.download_button(
+                            label="📑 Tải TẤT CẢ Báo cáo (Định dạng PDF)",
+                            data=zip_pdf_bytes,
+                            file_name=f'Bao_cao_tai_chinh_DS_{PERIOD_OPTIONS[period]}_PDF.zip',
+                            mime='application/zip',
+                            key='download_all_zip_pdf',
+                            help="Tải về một file ZIP chứa các file PDF (nối 3 báo cáo/mã)."
+                        )
+                        st.caption("Mỗi mã cổ phiếu là 1 file PDF (3 báo cáo gộp).")
+                    else:
+                        st.warning("Không thể tạo file ZIP PDF hoặc dữ liệu rỗng.")
                 
             else:
                 st.warning("Không có dữ liệu nào được tải thành công. Vui lòng kiểm tra lại các mã cổ phiếu.")
