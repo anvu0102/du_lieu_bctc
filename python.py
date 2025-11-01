@@ -64,7 +64,7 @@ def get_financial_data(symbol, period='year', source=SOURCE_DEFAULT):
     Tải Bảng Cân đối Kế toán, Báo cáo KQKD, và Báo cáo Lưu chuyển Tiền tệ
     cho một mã cổ phiếu sử dụng Vnstock.
     """
-    st.info(f"Đang tải dữ liệu tài chính cho mã **{symbol}** (Nguồn: {source}, Kỳ: {period})...")
+    # st.info(f"Đang tải dữ liệu tài chính cho mã **{symbol}** (Nguồn: {source}, Kỳ: {period})...")
     financial_data = {}
     
     try:
@@ -74,12 +74,12 @@ def get_financial_data(symbol, period='year', source=SOURCE_DEFAULT):
         financial_data['income_statement'] = stock_api.finance.income_statement(period=period)
         financial_data['cash_flow'] = stock_api.finance.cash_flow(period=period)
 
-        st.success(f"Tải dữ liệu thành công cho **{symbol}**.")
+        # st.success(f"Tải dữ liệu thành công cho **{symbol}**.")
         return financial_data
         
     except Exception as e:
-        st.error(f"Lỗi khi tải dữ liệu cho **{symbol}**: {e}")
-        st.warning("Vui lòng kiểm tra lại mã cổ phiếu và đảm bảo API nguồn dữ liệu đang hoạt động.")
+        # st.error(f"Lỗi khi tải dữ liệu cho **{symbol}**: {e}")
+        # st.warning("Vui lòng kiểm tra lại mã cổ phiếu và đảm bảo API nguồn dữ liệu đang hoạt động.")
         return None
 
 # --- HÀM TẢI DỮ LIỆU TÀI CHÍNH TỪ VNSTOCK (CHO DANH SÁCH MÃ) ---
@@ -95,15 +95,22 @@ def get_all_financial_data(stock_list, period='year', source=SOURCE_DEFAULT):
 
     for i, symbol in enumerate(stock_list):
         status_text.info(f"Đang tải dữ liệu cho mã **{symbol}** ({i + 1}/{total_stocks})...")
+        # Sử dụng hàm get_financial_data không hiển thị thông báo chi tiết trong vòng lặp
         data = get_financial_data(symbol, period, source)
+        
+        # Kiểm tra dữ liệu hợp lệ (không rỗng)
         if data and not any(df.empty for df in data.values() if df is not None):
             all_data[symbol] = data
-    
+        elif data is None:
+             st.warning(f"Lỗi tải dữ liệu cho **{symbol}**. Bỏ qua.")
+        else:
+             st.info(f"Dữ liệu cho **{symbol}** bị trống. Bỏ qua.")
+
     status_text.success(f"Hoàn tất tải dữ liệu cho {len(all_data)}/{total_stocks} mã cổ phiếu.")
     return all_data
 
 
-# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐƠN SHEET ---
+# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐƠN SHEET (Giữ nguyên) ---
 @st.cache_data
 def to_excel(df_to_save, name):
     output = BytesIO()
@@ -112,7 +119,7 @@ def to_excel(df_to_save, name):
         df_to_save.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐA-SHEET ---
+# --- HÀM HỖ TRỢ TẠO FILE EXCEL ĐA-SHEET (Giữ nguyên) ---
 @st.cache_data
 def create_combined_excel(symbol, financial_data):
     """Tạo file Excel (.xlsx) với 3 sheets: Bảng Cân đối Kế toán, Báo cáo KQKD, Báo cáo Lưu chuyển Tiền tệ."""
@@ -143,27 +150,63 @@ def create_combined_excel(symbol, financial_data):
         return output.getvalue()
     return None
 
-# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO CỦA DANH SÁCH CỔ PHIẾU ---
-def create_zip_file(all_financial_data, period):
-    """Nén tất cả các file Excel Báo cáo Tài chính của từng mã vào một file ZIP."""
+# --- HÀM HỖ TRỢ TẠO FILE TXT TỔNG HỢP (MỚI) ---
+def create_combined_txt(symbol, financial_data):
+    """Chuyển đổi 3 DataFrame thành một chuỗi văn bản (TXT) duy nhất."""
+    
+    txt_content = f"### Báo Cáo Tài Chính Tổng Hợp Cho Mã: {symbol}\n"
+    txt_content += "=" * 50 + "\n\n"
+    
+    total_valid_reports = 0
+
+    for key, name in REPORT_TYPES.items():
+        df = financial_data.get(key)
+        
+        if df is not None and not df.empty:
+            total_valid_reports += 1
+            
+            # Chuẩn hóa DataFrame
+            if df.index.names is not None and len(df.index.names) > 0:
+                df_to_text = df.reset_index(drop=False)
+            else:
+                df_to_text = df.copy()
+            
+            # Sắp xếp hiển thị: mới nhất lên đầu
+            sort_col = 'id' if 'id' in df_to_text.columns else ('ReportDate' if 'ReportDate' in df_to_text.columns else df_to_text.columns[0])
+            if sort_col in df_to_text.columns:
+                df_to_text = df_to_text.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
+
+            txt_content += f"## 1. {name}\n"
+            # Sử dụng markdown format để giữ cấu trúc bảng dễ đọc trong TXT
+            txt_content += df_to_text.to_markdown(index=False)
+            txt_content += "\n\n" + "-" * 50 + "\n\n"
+    
+    if total_valid_reports > 0:
+        return txt_content
+    return None
+
+# --- HÀM TẠO FILE ZIP CHỨA TẤT CẢ CÁC BÁO CÁO DẠNG TXT ---
+def create_zip_file_txt(all_financial_data, period):
+    """Nén tất cả các file TXT Báo cáo Tài chính của từng mã vào một file ZIP."""
     
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
         for symbol, data in all_financial_data.items():
-            excel_data = create_combined_excel(symbol, data)
+            # Sử dụng hàm tạo nội dung TXT mới
+            txt_content = create_combined_txt(symbol, data)
             
-            if excel_data:
-                file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.xlsx'
-                # Ghi file Excel (BytesIO content) vào file ZIP
-                zip_file.writestr(file_name, excel_data)
+            if txt_content:
+                file_name = f'Bao_cao_tai_chinh_{symbol}_{period}.txt'
+                # Ghi nội dung TXT (string) vào file ZIP
+                zip_file.writestr(file_name, txt_content.encode('utf-8'))
                 
     # Trở về đầu buffer để đọc nội dung file ZIP
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
 
-# --- HÀM TÍNH TOÁN THỐNG KÊ MÔ TẢ (CHO TÀI CHÍNH) ---
+# --- HÀM TÍNH TOÁN THỐNG KÊ MÔ TẢ (CHO TÀI CHÍNH) (Giữ nguyên) ---
 def calculate_descriptive_stats(df, report_name):
     """Tính toán thống kê mô tả chi tiết cho các chỉ số tài chính."""
     stats_list = []
@@ -469,32 +512,33 @@ elif analysis_mode == 'Phân tích Danh sách Cổ phiếu':
         st.subheader(f"📥 Tải Báo cáo Tài chính cho Danh sách Cổ phiếu ({len(stock_list)} mã)")
         st.info(f"Các mã sẽ được tải: **{', '.join(stock_list)}** (Kỳ: {PERIOD_OPTIONS[period]})")
 
-        if st.button(f"🔍 Tải Dữ liệu Báo cáo Tài chính cho {len(stock_list)} Mã"):
+        if st.button(f"🔍 Tải Dữ liệu Báo cáo Tài chính (TXT) cho {len(stock_list)} Mã"):
             
             all_financial_data = get_all_financial_data(stock_list, period=period, source=SOURCE_DEFAULT)
 
             if all_financial_data:
                 st.success(f"Đã tải thành công dữ liệu cho {len(all_financial_data)} mã.")
                 st.markdown("---")
-                st.subheader("Hoàn tất: Tải File ZIP Tổng hợp")
+                st.subheader("Hoàn tất: Tải File ZIP Tổng hợp chứa TXT")
 
-                # --- PHẦN TẠO VÀ TẢI FILE ZIP (MỚI) ---
-                with st.spinner('Đang nén tất cả báo cáo tài chính thành file ZIP...'):
-                    zip_bytes = create_zip_file(all_financial_data, period)
+                # --- PHẦN TẠO VÀ TẢI FILE ZIP CHỨA TXT (ĐÃ THAY ĐỔI) ---
+                with st.spinner('Đang chuyển đổi sang TXT và nén tất cả báo cáo thành file ZIP...'):
+                    # Sử dụng hàm tạo ZIP chứa TXT
+                    zip_bytes = create_zip_file_txt(all_financial_data, period)
 
                 if zip_bytes:
                     st.download_button(
-                        label="📦 Tải TẤT CẢ Báo cáo Tài chính (.zip)",
+                        label="📦 Tải TẤT CẢ Báo cáo Tài chính (.zip) - Định dạng TXT",
                         data=zip_bytes,
-                        file_name=f'Bao_cao_tai_chinh_Danh_sach_{PERIOD_OPTIONS[period]}_{len(all_financial_data)}_ma.zip',
+                        file_name=f'Bao_cao_tai_chinh_DS_{PERIOD_OPTIONS[period]}_{len(all_financial_data)}_ma.zip',
                         mime='application/zip',
-                        key='download_all_zip',
-                        help="Tải về một file ZIP chứa các file Excel (3 sheets/mã) cho tất cả các cổ phiếu đã tải thành công."
+                        key='download_all_zip_txt',
+                        help="Tải về một file ZIP chứa các file TXT (3 báo cáo/mã) cho tất cả các cổ phiếu đã tải thành công."
                     )
                     st.success("File ZIP tổng hợp đã sẵn sàng để tải xuống.")
                 else:
                     st.error("Không thể tạo file ZIP. Có thể không có đủ dữ liệu hợp lệ cho bất kỳ mã cổ phiếu nào.")
-                # --- KẾT THÚC PHẦN TẠO VÀ TẢI FILE ZIP ---
+                # --- KẾT THÚC PHẦN TẠO VÀ TẢI FILE ZIP CHỨA TXT ---
             
             else:
                 st.warning("Không có dữ liệu nào được tải thành công. Vui lòng kiểm tra lại các mã cổ phiếu.")
