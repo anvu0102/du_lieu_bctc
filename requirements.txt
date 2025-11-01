@@ -8,4 +8,5 @@ google-genai
 setuptools
 pandas-datareader
 openpyxl
+xlsxwriter
 tabulate
